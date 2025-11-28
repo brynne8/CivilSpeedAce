@@ -7,6 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/nosleep/0.12.0/NoSleep.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
         .scrollbar-thin::-webkit-scrollbar { height: 4px; width: 4px; }
@@ -19,7 +20,7 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useRef } = React;
 
         // --- 图标组件 ---
         const Icon = ({ children, size = 20, className = "" }) => (
@@ -47,12 +48,16 @@
             const [questions, setQuestions] = useState([]);
             const [currentIndex, setCurrentIndex] = useState(0);
             const [isTimerRunning, setIsTimerRunning] = useState(false);
-            const [wakeLock, setWakeLock] = useState(null);
             const [isWakeLockActive, setIsWakeLockActive] = useState(false);
             const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
             const [autoNext, setAutoNext] = useState(true);
+            const noSleepRef = useRef(null);
 
-            // 样式主题
+            useEffect(() => {
+                if (window.NoSleep) noSleepRef.current = new window.NoSleep();
+                return () => { if (noSleepRef.current) noSleepRef.current.disable(); };
+            }, []);
+
             const theme = {
                 bg: isDarkMode ? 'bg-slate-900' : 'bg-slate-50',
                 card: isDarkMode ? 'bg-slate-800 border-slate-700 shadow-slate-900' : 'bg-white border-slate-200 shadow-sm',
@@ -70,7 +75,6 @@
                 setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
             };
 
-            // 计时器
             useEffect(() => {
                 let interval = null;
                 if (isTimerRunning && appMode === 'testing') {
@@ -85,20 +89,19 @@
                 return () => clearInterval(interval);
             }, [isTimerRunning, appMode, currentIndex]);
 
-            // Wake Lock
             const toggleWakeLock = async (isManual = false) => {
-                if (!('wakeLock' in navigator)) { if (isManual) showToast("浏览器不支持屏幕常亮", "error"); return; }
-                if (isWakeLockActive && wakeLock) {
-                    try { await wakeLock.release(); setWakeLock(null); setIsWakeLockActive(false); showToast("屏幕常亮已关闭"); } catch (err) {}
-                } else {
-                    try {
-                        const lock = await navigator.wakeLock.request('screen');
-                        setWakeLock(lock);
+                if (!noSleepRef.current) { if (isManual) showToast("NoSleep 未就绪", "error"); return; }
+                try {
+                    if (!isWakeLockActive) {
+                        await noSleepRef.current.enable();
                         setIsWakeLockActive(true);
                         if (isManual) showToast("屏幕常亮已开启", "success");
-                        lock.addEventListener('release', () => { setIsWakeLockActive(false); setWakeLock(null); });
-                    } catch (err) { if (isManual) showToast("无法开启常亮 (权限限制)", "error"); }
-                }
+                    } else {
+                        noSleepRef.current.disable();
+                        setIsWakeLockActive(false);
+                        showToast("屏幕常亮已关闭");
+                    }
+                } catch (err) { if (isManual) showToast("开启失败", "error"); }
             };
 
             const startTest = () => {
@@ -111,7 +114,9 @@
                 setCurrentIndex(0);
                 setAppMode('testing');
                 setIsTimerRunning(true);
-                if (!isWakeLockActive) toggleWakeLock(false).catch(()=>{});
+                if (!isWakeLockActive && noSleepRef.current) {
+                    noSleepRef.current.enable().then(() => setIsWakeLockActive(true)).catch(()=>{});
+                }
             };
 
             const handleOptionSelect = (option) => {
@@ -121,19 +126,17 @@
 
             const finishTest = () => {
                 setIsTimerRunning(false);
-                if (wakeLock) wakeLock.release().catch(()=>{});
                 setAppMode('mode_selection');
             };
 
             const quitTest = () => {
                 setIsTimerRunning(false);
                 if (confirm("确定要放弃本次训练并返回设置页吗？")) {
-                    if (wakeLock) wakeLock.release().catch(()=>{});
+                    if (isWakeLockActive && noSleepRef.current) { noSleepRef.current.disable(); setIsWakeLockActive(false); }
                     setAppMode('setup');
                 } else { setIsTimerRunning(true); }
             };
 
-            // 智能交卷逻辑
             const checkAndFinish = () => {
                 const unansweredCount = questions.filter(q => q.userOption === null).length;
                 if (unansweredCount > 0) {
@@ -208,13 +211,25 @@
                                 })}
                             </div>
                         </div>
+
+                        {/* 中间操作区 - 响应式优化 (统一固定高度，不撑满) */}
                         <div className="flex-1 flex flex-col items-center justify-center p-2 min-h-0">
-                            <div className="shrink-0 text-center mb-2"><div className="text-3xl font-bold opacity-10 select-none -mb-2">#{currentQ.id}</div><div className={`text-xs font-medium opacity-60 ${theme.subText}`}>第 {currentIndex + 1} / {questions.length} 题</div></div>
-                            <div className="flex-1 w-full max-w-sm grid grid-cols-2 gap-2 mb-2 min-h-0">
+                            <div className="shrink-0 text-center mb-6"><div className="text-3xl font-bold opacity-10 select-none -mb-2">#{currentQ.id}</div><div className={`text-xs font-medium opacity-60 ${theme.subText}`}>第 {currentIndex + 1} / {questions.length} 题</div></div>
+
+                            <div className="w-full max-w-sm md:max-w-xl grid grid-cols-2 gap-4 mb-4 shrink-0">
                                 {['A', 'B', 'C', 'D'].map(opt => (
-                                    <button key={opt} onClick={() => handleOptionSelect(opt)} className={`h-full max-h-[16vh] rounded-xl border-2 transition-all active:scale-95 flex items-center justify-center text-xl font-bold shadow-sm ${currentQ.userOption === opt ? theme.optionActive : `${theme.card} ${theme.optionBtn}`}`}>{opt}</button>
+                                    <button
+                                        key={opt}
+                                        onClick={() => handleOptionSelect(opt)}
+                                        className={`rounded-xl border-2 transition-all active:scale-95 flex items-center justify-center text-xl font-bold shadow-sm
+                                        h-24 md:h-32
+                                        ${currentQ.userOption === opt ? theme.optionActive : `${theme.card} ${theme.optionBtn}`}`}
+                                    >
+                                        {opt}
+                                    </button>
                                 ))}
                             </div>
+
                             <label className={`shrink-0 flex items-center gap-2 text-xs py-2 cursor-pointer ${theme.subText}`}><input type="checkbox" checked={autoNext} onChange={e => setAutoNext(e.target.checked)} className="rounded text-blue-600 w-4 h-4"/>选完自动跳至下一题</label>
                         </div>
                     </div>
@@ -268,7 +283,7 @@
                 </div>
             );
 
-            // --- 复盘报告 (高级分析) ---
+            // --- 复盘报告 (算法修正) ---
             const renderAnalysis = () => {
                 const totalQuestions = questions.length;
                 const totalTime = questions.reduce((acc, q) => acc + q.timeSpent, 0);
@@ -282,20 +297,24 @@
                 const correctCount = questions.filter(q => q.userOption === q.correctAnswer).length;
                 const accuracy = hasAnswers ? Math.round((correctCount / totalQuestions) * 100) : null;
 
-                // 进阶统计：总时间盈亏
+                // --- 新版算法区 ---
                 const totalAllowedTime = totalQuestions * config.targetTimePerQuestion;
-                const totalDiff = totalTime - totalAllowedTime; // 正数表示超时，负数表示节省
+                const totalDiff = totalTime - totalAllowedTime;
                 const totalDiffAbs = Math.abs(totalDiff);
                 const diffMin = Math.floor(totalDiffAbs / 60);
                 const diffSec = totalDiffAbs % 60;
                 const diffText = `${diffMin > 0 ? diffMin + '分' : ''}${diffSec}秒`;
 
-                // 进阶统计：有效得分（黄金得分）= 做对 且 时间达标
-                const efficientCorrectCount = questions.filter(q =>
-                    q.correctAnswer &&
-                    q.userOption === q.correctAnswer &&
-                    q.timeSpent <= config.targetTimePerQuestion
-                ).length;
+                // 核心修改：真实实力（折算得分）
+                let effectiveScore = 0;
+                if (hasAnswers) {
+                    if (totalTime > totalAllowedTime) {
+                        const ratio = totalAllowedTime / totalTime;
+                        effectiveScore = (correctCount * ratio).toFixed(1); // 保留一位小数
+                    } else {
+                        effectiveScore = correctCount;
+                    }
+                }
 
                 const onTimePercent = (onTimeCount / totalQuestions) * 100;
                 const normalOvertimePercent = ((overtimeQuestions.length - seriousOvertimeQuestions.length) / totalQuestions) * 100;
@@ -311,7 +330,6 @@
                     </div>
                     <div className="flex-1 overflow-y-auto p-4 space-y-4">
 
-                        {/* 1. 核心指标 */}
                         <div className="flex gap-3">
                             <div className={`flex-1 p-3 rounded-xl border flex items-center gap-3 min-w-0 ${theme.card}`}>
                                 <div className="w-12 h-12 rounded-full shrink-0 shadow-inner relative" style={pieStyle}>
@@ -335,7 +353,6 @@
                             </div>
                         </div>
 
-                        {/* 2. 进阶大盘分析 (新增) */}
                         <div className={`p-4 rounded-xl border flex gap-4 ${theme.card}`}>
                             <div className="flex-1 text-center border-r border-slate-200 dark:border-slate-700">
                                 <div className="flex items-center justify-center gap-1 mb-1 text-xs opacity-70"><Zap size={14}/> 总时间大盘</div>
@@ -346,9 +363,9 @@
                             </div>
                             {hasAnswers ? (
                                 <div className="flex-1 text-center">
-                                    <div className="flex items-center justify-center gap-1 mb-1 text-xs opacity-70"><TrendingUp size={14}/> 真实实力(有效得分)</div>
-                                    <div className="text-lg font-bold text-blue-600">{efficientCorrectCount} 题</div>
-                                    <div className="text-[10px] opacity-50">做对 且 未超时</div>
+                                    <div className="flex items-center justify-center gap-1 mb-1 text-xs opacity-70"><TrendingUp size={14}/> 真实实力(折算)</div>
+                                    <div className="text-lg font-bold text-blue-600">{effectiveScore} 题</div>
+                                    <div className="text-[10px] opacity-50">按超时比例折损</div>
                                 </div>
                             ) : (
                                 <div className="flex-1 text-center flex flex-col justify-center">
@@ -358,7 +375,6 @@
                             )}
                         </div>
 
-                        {/* 3. 文字结论 */}
                         <div className={`p-4 rounded-xl border border-l-4 border-l-orange-500 ${isDarkMode ? 'bg-slate-800' : 'bg-orange-50'}`}>
                             <h3 className="font-bold flex items-center gap-2 mb-2 text-orange-600"><AlertTriangle size={18}/> 诊断结论</h3>
                             <ul className="text-sm space-y-2 opacity-90">
@@ -375,7 +391,6 @@
                             </ul>
                         </div>
 
-                        {/* 4. 详细数据 */}
                         <div className={`rounded-xl border overflow-hidden ${theme.card}`}>
                             <div className={`p-3 border-b text-xs font-bold uppercase tracking-wider opacity-50 flex justify-between ${isDarkMode ? 'bg-slate-900' : 'bg-slate-50'}`}><span>详细数据列表</span><span>{totalQuestions} 题</span></div>
                             <div className="divide-y divide-slate-100 dark:divide-slate-700">
@@ -384,10 +399,9 @@
                                     const isSlow = diff > 0;
                                     const isSerious = diff > config.targetTimePerQuestion * 0.5;
                                     const isCorrect = hasAnswers ? q.userOption === q.correctAnswer : null;
-                                    const isEfficient = isCorrect && !isSlow;
 
                                     return (
-                                        <div key={q.id} className={`flex items-center justify-between p-3 text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50 ${isEfficient && hasAnswers ? 'bg-green-50/50 dark:bg-green-900/10' : ''}`}>
+                                        <div key={q.id} className="flex items-center justify-between p-3 text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50">
                                             <div className="flex items-center gap-3 w-12"><span className="font-bold opacity-70">#{q.id}</span></div>
                                             <div className="flex-1 mx-2 flex flex-col justify-center">
                                                 <div className="flex justify-between text-xs mb-1"><span className={`font-mono font-bold ${isSerious ? 'text-red-500' : isSlow ? 'text-orange-500' : 'text-green-500'}`}>{q.timeSpent}s</span>{isSlow && <span className="text-[10px] text-red-400">+{diff}s</span>}</div>
