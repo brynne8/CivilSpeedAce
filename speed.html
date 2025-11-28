@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>行测提速神器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        .scrollbar-thin::-webkit-scrollbar { height: 4px; width: 4px; }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background-color: rgba(156, 163, 175, 0.5); border-radius: 4px; }
+        body { user-select: none; -webkit-user-select: none; touch-action: manipulation; -webkit-tap-highlight-color: transparent; overflow: hidden; }
+        #root { height: 100dvh; width: 100vw; overflow: hidden; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // --- 图标组件 ---
+        const Icon = ({ children, size = 20, className = "" }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{children}</svg>
+        );
+        const Play = (props) => <Icon {...props}><polygon points="5 3 19 12 5 21 5 3"></polygon></Icon>;
+        const Clock = (props) => <Icon {...props}><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></Icon>;
+        const PieChart = (props) => <Icon {...props}><path d="M21.21 15.89A10 10 0 1 1 8 2.83"></path><path d="M22 12A10 10 0 0 0 12 2v10z"></path></Icon>;
+        const Sun = (props) => <Icon {...props}><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></Icon>;
+        const Moon = (props) => <Icon {...props}><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></Icon>;
+        const ChevronLeft = (props) => <Icon {...props}><polyline points="15 18 9 12 15 6"></polyline></Icon>;
+        const ChevronRight = (props) => <Icon {...props}><polyline points="9 18 15 12 9 6"></polyline></Icon>;
+        const CheckCircle = (props) => <Icon {...props}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></Icon>;
+        const Lock = (props) => <Icon {...props}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></Icon>;
+        const Unlock = (props) => <Icon {...props}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></Icon>;
+        const LogOut = (props) => <Icon {...props}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></Icon>;
+        const AlertTriangle = (props) => <Icon {...props}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></Icon>;
+        const Check = (props) => <Icon {...props}><polyline points="20 6 9 17 4 12"></polyline></Icon>;
+        const X = (props) => <Icon {...props}><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></Icon>;
+
+        function App() {
+            const [appMode, setAppMode] = useState('setup');
+            const [isDarkMode, setIsDarkMode] = useState(false);
+            const [config, setConfig] = useState({ startNum: 1, endNum: 20, targetTimePerQuestion: 60 });
+            const [questions, setQuestions] = useState([]);
+            const [currentIndex, setCurrentIndex] = useState(0);
+            const [isTimerRunning, setIsTimerRunning] = useState(false);
+            const [wakeLock, setWakeLock] = useState(null);
+            const [isWakeLockActive, setIsWakeLockActive] = useState(false);
+            const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
+            const [autoNext, setAutoNext] = useState(true);
+
+            // 样式主题
+            const theme = {
+                bg: isDarkMode ? 'bg-slate-900' : 'bg-slate-50',
+                card: isDarkMode ? 'bg-slate-800 border-slate-700 shadow-slate-900' : 'bg-white border-slate-200 shadow-sm',
+                text: isDarkMode ? 'text-slate-100' : 'text-slate-900',
+                subText: isDarkMode ? 'text-slate-400' : 'text-slate-500',
+                navActive: isDarkMode ? 'ring-2 ring-blue-400 bg-blue-900/50 text-blue-100' : 'ring-2 ring-blue-500 bg-blue-50 text-blue-700',
+                navDone: isDarkMode ? 'bg-slate-700 text-blue-300 border-slate-600' : 'bg-blue-100 text-blue-600 border-blue-200',
+                navNormal: isDarkMode ? 'border-slate-700 text-slate-600 hover:border-slate-500' : 'bg-transparent border-slate-200 text-slate-400 hover:border-slate-300',
+                optionBtn: isDarkMode ? 'hover:border-slate-500 bg-slate-800 text-slate-200' : 'bg-white hover:border-blue-300 text-slate-700',
+                optionActive: 'bg-blue-600 border-blue-600 text-white shadow-md',
+            };
+
+            const showToast = (message, type = 'info') => {
+                setToast({ show: true, message, type });
+                setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+            };
+
+            // 计时器
+            useEffect(() => {
+                let interval = null;
+                if (isTimerRunning && appMode === 'testing') {
+                    interval = setInterval(() => {
+                        setQuestions(prev => {
+                            const newQuestions = [...prev];
+                            if (newQuestions[currentIndex]) newQuestions[currentIndex].timeSpent += 1;
+                            return newQuestions;
+                        });
+                    }, 1000);
+                }
+                return () => clearInterval(interval);
+            }, [isTimerRunning, appMode, currentIndex]);
+
+            // Wake Lock
+            const toggleWakeLock = async (isManual = false) => {
+                if (!('wakeLock' in navigator)) { if (isManual) showToast("浏览器不支持屏幕常亮", "error"); return; }
+                if (isWakeLockActive && wakeLock) {
+                    try { await wakeLock.release(); setWakeLock(null); setIsWakeLockActive(false); showToast("屏幕常亮已关闭"); } catch (err) {}
+                } else {
+                    try {
+                        const lock = await navigator.wakeLock.request('screen');
+                        setWakeLock(lock);
+                        setIsWakeLockActive(true);
+                        if (isManual) showToast("屏幕常亮已开启", "success");
+                        lock.addEventListener('release', () => { setIsWakeLockActive(false); setWakeLock(null); });
+                    } catch (err) { if (isManual) showToast("无法开启常亮 (权限限制)", "error"); }
+                }
+            };
+
+            const startTest = () => {
+                const qCount = parseInt(config.endNum) - parseInt(config.startNum) + 1;
+                if (qCount <= 0) { alert("题号设置错误"); return; }
+                const initialQuestions = Array.from({length: qCount}, (_, i) => ({
+                    id: parseInt(config.startNum) + i, userOption: null, timeSpent: 0, correctAnswer: null,
+                }));
+                setQuestions(initialQuestions);
+                setCurrentIndex(0);
+                setAppMode('testing');
+                setIsTimerRunning(true);
+                if (!isWakeLockActive) toggleWakeLock(false).catch(()=>{});
+            };
+
+            const handleOptionSelect = (option) => {
+                setQuestions(prev => { const newQ = [...prev]; newQ[currentIndex].userOption = option; return newQ; });
+                if (autoNext && currentIndex < questions.length - 1) setTimeout(() => setCurrentIndex(prev => prev + 1), 150);
+            };
+
+            const finishTest = () => {
+                setIsTimerRunning(false);
+                if (wakeLock) wakeLock.release().catch(()=>{});
+                setAppMode('mode_selection');
+            };
+
+            const quitTest = () => {
+                setIsTimerRunning(false);
+                if (confirm("确定要放弃本次训练并返回设置页吗？")) {
+                    if (wakeLock) wakeLock.release().catch(()=>{});
+                    setAppMode('setup');
+                } else { setIsTimerRunning(true); }
+            };
+
+            const ToastComponent = () => (
+                <div className={`fixed bottom-24 left-1/2 transform -translate-x-1/2 px-4 py-2 rounded-lg shadow-lg text-sm font-medium z-50 transition-all duration-300 ${toast.show ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'} ${toast.type === 'error' ? 'bg-red-500 text-white' : 'bg-slate-800 text-white'}`}>{toast.message}</div>
+            );
+
+            // --- 渲染部分 ---
+
+            const renderSetup = () => (
+                <div className={`flex flex-col items-center justify-center h-full p-6 transition-colors duration-300 ${theme.bg}`}>
+                    <div className={`w-full max-w-md rounded-2xl p-6 border flex flex-col gap-6 ${theme.card}`}>
+                        <div className="flex justify-between items-center">
+                            <div className="flex items-center gap-2 text-blue-600 font-bold text-xl"><Clock size={24} /> <span>行测训练</span></div>
+                            <button onClick={() => setIsDarkMode(!isDarkMode)} className={`p-2 rounded-full transition-colors ${isDarkMode ? 'bg-slate-700 text-yellow-400' : 'bg-slate-100 text-slate-400'}`}>{isDarkMode ? <Sun size={18} /> : <Moon size={18} />}</button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div><label className={`block text-xs font-medium mb-1 ${theme.subText}`}>起始题号</label><input type="number" value={config.startNum} onChange={(e) => setConfig({...config, startNum: e.target.value})} className={`w-full p-3 border rounded-lg text-center text-lg font-mono outline-none focus:ring-2 focus:ring-blue-500 ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`} /></div>
+                            <div><label className={`block text-xs font-medium mb-1 ${theme.subText}`}>结束题号</label><input type="number" value={config.endNum} onChange={(e) => setConfig({...config, endNum: e.target.value})} className={`w-full p-3 border rounded-lg text-center text-lg font-mono outline-none focus:ring-2 focus:ring-blue-500 ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`} /></div>
+                        </div>
+                        <div>
+                            <label className={`block text-xs font-medium mb-2 ${theme.subText}`}>单题目标 (秒)</label>
+                            <div className="flex items-center">
+                                <input type="range" min="30" max="120" step="5" value={config.targetTimePerQuestion} onChange={(e) => setConfig({...config, targetTimePerQuestion: Number(e.target.value)})} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer mr-4 accent-blue-600" />
+                                <span className="text-xl font-bold text-blue-600 font-mono w-16 text-right">{config.targetTimePerQuestion}s</span>
+                            </div>
+                        </div>
+                        <button onClick={startTest} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-transform"><Play size={18} fill="currentColor" /> 开始训练</button>
+                    </div>
+                </div>
+            );
+
+            const renderTesting = () => {
+                const currentQ = questions[currentIndex];
+                const remaining = config.targetTimePerQuestion - currentQ.timeSpent;
+                const isOvertime = remaining < 0;
+                const isUrgent = remaining <= 10 && !isOvertime;
+                return (
+                <div className={`flex flex-col h-full overflow-hidden transition-colors duration-300 ${theme.bg} ${theme.text}`}>
+                    <div className={`shrink-0 px-4 py-2 flex justify-between items-center border-b ${isDarkMode ? 'border-slate-800 bg-slate-800' : 'border-slate-200 bg-white'}`}>
+                        <div className={`text-xl font-mono font-bold flex items-center gap-1 ${isOvertime ? 'text-red-500' : isUrgent ? 'text-orange-500 animate-pulse' : 'text-blue-600'}`}><Clock size={20} />{isOvertime ? `+${Math.abs(remaining)}` : remaining}</div>
+                        <div className="flex gap-2">
+                            <button onClick={() => toggleWakeLock(true)} className={`p-1.5 rounded-full transition-colors ${isWakeLockActive ? 'bg-green-100 text-green-600 ring-1 ring-green-500' : 'bg-slate-100 text-slate-400 dark:bg-slate-700'}`}>{isWakeLockActive ? <Lock size={16} /> : <Unlock size={16} />}</button>
+                            <button onClick={() => setIsDarkMode(!isDarkMode)} className={`p-1.5 rounded-full transition-colors ${isDarkMode ? 'bg-slate-700 text-yellow-400' : 'bg-slate-100 text-slate-600'}`}>{isDarkMode ? <Sun size={16} /> : <Moon size={16} />}</button>
+                        </div>
+                    </div>
+                    <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
+                        <div className={`shrink-0 max-h-[25vh] overflow-y-auto p-2 border-b scrollbar-thin ${isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-100 bg-slate-50/50'}`}>
+                            <div className="grid grid-cols-5 sm:grid-cols-8 gap-1.5">
+                                {questions.map((q, idx) => {
+                                    const isActive = idx === currentIndex; const isDone = q.userOption !== null;
+                                    let itemClass = `h-8 rounded border flex items-center justify-center text-xs font-bold transition-all ${theme.navNormal}`;
+                                    if (isActive) itemClass = `h-8 rounded flex items-center justify-center text-xs font-bold transition-all transform scale-105 z-10 ${theme.navActive}`;
+                                    else if (isDone) itemClass = `h-8 rounded border flex items-center justify-center text-xs font-bold transition-all ${theme.navDone}`;
+                                    return <button key={q.id} onClick={() => setCurrentIndex(idx)} className={itemClass}>{q.id}</button>;
+                                })}
+                            </div>
+                        </div>
+                        <div className="flex-1 flex flex-col items-center justify-center p-2 min-h-0">
+                            <div className="shrink-0 text-center mb-2"><div className="text-3xl font-bold opacity-10 select-none -mb-2">#{currentQ.id}</div><div className={`text-xs font-medium opacity-60 ${theme.subText}`}>第 {currentIndex + 1} / {questions.length} 题</div></div>
+                            <div className="flex-1 w-full max-w-sm grid grid-cols-2 gap-2 mb-2 min-h-0">
+                                {['A', 'B', 'C', 'D'].map(opt => (
+                                    <button key={opt} onClick={() => handleOptionSelect(opt)} className={`h-full max-h-[16vh] rounded-xl border-2 transition-all active:scale-95 flex items-center justify-center text-xl font-bold shadow-sm ${currentQ.userOption === opt ? theme.optionActive : `${theme.card} ${theme.optionBtn}`}`}>{opt}</button>
+                                ))}
+                            </div>
+                            <label className={`shrink-0 flex items-center gap-2 text-xs py-2 cursor-pointer ${theme.subText}`}><input type="checkbox" checked={autoNext} onChange={e => setAutoNext(e.target.checked)} className="rounded text-blue-600 w-4 h-4"/>选完自动跳至下一题</label>
+                        </div>
+                    </div>
+                    <div className={`shrink-0 h-14 px-3 border-t flex justify-between items-center gap-3 ${isDarkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'}`}>
+                        <button onClick={() => setCurrentIndex(c => Math.max(0, c - 1))} disabled={currentIndex === 0} className={`w-12 h-10 flex items-center justify-center rounded-lg disabled:opacity-30 border ${theme.card} ${theme.text}`}><ChevronLeft size={20} /></button>
+                        <div className="flex gap-2 flex-1 justify-center">
+                            <button onClick={quitTest} className="px-3 h-10 rounded-lg font-bold text-red-500 bg-red-50 border border-red-100 hover:bg-red-100 flex items-center gap-1"><LogOut size={16} /> <span className="text-sm">退出</span></button>
+                            <button onClick={() => { if(window.confirm("确定交卷并查看报告？")) finishTest(); }} className="px-5 h-10 bg-slate-800 text-white rounded-lg font-bold shadow hover:bg-slate-700 active:scale-95 dark:bg-blue-600 text-sm flex-1 max-w-[120px]">交卷</button>
+                        </div>
+                        <button onClick={() => setCurrentIndex(c => Math.min(questions.length - 1, c + 1))} disabled={currentIndex === questions.length - 1} className={`w-12 h-10 flex items-center justify-center rounded-lg disabled:opacity-30 border ${theme.card} ${theme.text}`}><ChevronRight size={20} /></button>
+                    </div>
+                </div>
+                );
+            };
+
+            const renderModeSelection = () => (
+                <div className={`flex flex-col items-center justify-center h-full p-6 space-y-6 ${theme.bg} ${theme.text}`}>
+                    <div className="text-center mb-6">
+                        <h2 className="text-2xl font-bold mb-2">训练结束</h2>
+                        <p className="opacity-60 text-sm">总用时 {Math.floor(questions.reduce((a,b)=>a+b.timeSpent,0)/60)}分{questions.reduce((a,b)=>a+b.timeSpent,0)%60}秒</p>
+                    </div>
+                    <button onClick={() => setAppMode('input_answers')} className={`w-full max-w-sm p-5 rounded-xl border flex items-center justify-between group transition-all ${theme.card} hover:border-blue-500`}>
+                        <div className="text-left"><h3 className="font-bold group-hover:text-blue-500">输入答案并复盘</h3><p className="text-xs opacity-50">分析正确率 + 时间</p></div><CheckCircle className="text-slate-300 group-hover:text-blue-500" />
+                    </button>
+                    <button onClick={() => setAppMode('analysis')} className={`w-full max-w-sm p-5 rounded-xl border flex items-center justify-between group transition-all ${theme.card} hover:border-orange-500`}>
+                        <div className="text-left"><h3 className="font-bold group-hover:text-orange-500">仅分析时间</h3><p className="text-xs opacity-50">只关注速度</p></div><Clock className="text-slate-300 group-hover:text-orange-500" />
+                    </button>
+                </div>
+            );
+
+            const renderInputAnswers = () => (
+                <div className={`flex flex-col h-full ${theme.bg} ${theme.text}`}>
+                    <div className={`shrink-0 p-3 shadow z-10 text-center font-bold sticky top-0 ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>输入正确答案</div>
+                    <div className="flex-1 overflow-y-auto p-3">
+                        <div className="grid grid-cols-1 gap-2 max-w-lg mx-auto">
+                            {questions.map((q, idx) => (
+                                <div key={q.id} className={`p-2 rounded-lg border flex items-center justify-between ${theme.card}`}>
+                                    <span className="font-bold w-8 text-sm">#{q.id}</span>
+                                    <div className="flex gap-1">
+                                        {['A','B','C','D'].map(opt => (
+                                            <button key={opt} onClick={() => { const newQ = [...questions]; newQ[idx].correctAnswer = opt; setQuestions(newQ); }} className={`w-8 h-8 rounded text-sm font-bold transition-colors ${q.correctAnswer === opt ? 'bg-green-600 text-white' : isDarkMode ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>{opt}</button>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    <div className={`shrink-0 p-3 border-t ${isDarkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'}`}>
+                        <button onClick={() => setAppMode('analysis')} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl shadow-lg">生成报告</button>
+                    </div>
+                </div>
+            );
+
+            // --- 核心优化：复盘报告 (彻底解决显示不全问题) ---
+            const renderAnalysis = () => {
+                const totalQuestions = questions.length;
+                const totalTime = questions.reduce((acc, q) => acc + q.timeSpent, 0);
+                const avgTime = Math.round(totalTime / totalQuestions);
+
+                const overtimeQuestions = questions.filter(q => q.timeSpent > config.targetTimePerQuestion);
+                const seriousOvertimeQuestions = questions.filter(q => q.timeSpent > config.targetTimePerQuestion * 1.5);
+                const onTimeCount = totalQuestions - overtimeQuestions.length;
+
+                const hasAnswers = questions.some(q => q.correctAnswer);
+                const correctCount = questions.filter(q => q.userOption === q.correctAnswer).length;
+                const accuracy = hasAnswers ? Math.round((correctCount / totalQuestions) * 100) : null;
+
+                const onTimePercent = (onTimeCount / totalQuestions) * 100;
+                const normalOvertimePercent = ((overtimeQuestions.length - seriousOvertimeQuestions.length) / totalQuestions) * 100;
+                const pieStyle = {
+                    background: `conic-gradient(#4ade80 0% ${onTimePercent}%, #facc15 ${onTimePercent}% ${onTimePercent + normalOvertimePercent}%, #f87171 ${onTimePercent + normalOvertimePercent}% 100%)`
+                };
+
+                return (
+                <div className={`flex flex-col h-full overflow-hidden ${theme.bg} ${theme.text}`}>
+                    <div className={`shrink-0 p-3 shadow flex justify-between items-center z-10 ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>
+                        <h2 className="font-bold text-lg flex items-center gap-2"><PieChart size={20}/> 训练复盘</h2>
+                        <button onClick={() => setAppMode('setup')} className="text-sm text-blue-500 font-medium px-3 py-1 bg-blue-50 rounded-full hover:bg-blue-100">再练一组</button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4 space-y-6">
+
+                        {/* 1. 核心指标 */}
+                        <div className="flex gap-3">
+                            {/* 左侧卡片 - 移除多余的 padding */}
+                            <div className={`flex-1 p-3 rounded-xl border flex items-center gap-3 min-w-0 ${theme.card}`}>
+                                <div className="w-12 h-12 rounded-full shrink-0 shadow-inner relative" style={pieStyle}>
+                                    <div className={`absolute inset-2.5 rounded-full ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}></div>
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                    <p className="opacity-50 text-xs uppercase font-bold tracking-wider">达标情况</p>
+                                    <div className="text-xl font-bold whitespace-nowrap leading-tight">{Math.round(onTimePercent)}%</div>
+                                    <div className="text-[10px] opacity-50 whitespace-nowrap">按时完成</div>
+                                </div>
+                            </div>
+
+                            {/* 右侧卡片 - 调整 padding 和 字体大小 */}
+                            <div className={`flex-1 p-3 rounded-xl border flex flex-col justify-center min-w-0 ${theme.card}`}>
+                                <p className="opacity-50 text-xs uppercase font-bold tracking-wider">{hasAnswers ? '正确率' : '平均用时'}</p>
+                                <div className={`text-2xl font-bold mt-1 whitespace-nowrap ${hasAnswers ? 'text-blue-500' : (avgTime > config.targetTimePerQuestion ? 'text-red-500' : 'text-green-500')}`}>
+                                    {hasAnswers ? `${accuracy}%` : `${avgTime}s`}
+                                </div>
+                                <div className="text-[10px] opacity-50 mt-0.5 whitespace-nowrap">
+                                    {hasAnswers ? `对 ${correctCount} / 错 ${totalQuestions-correctCount}` : `目标 ${config.targetTimePerQuestion}s`}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 2. 文字结论 */}
+                        <div className={`p-4 rounded-xl border border-l-4 border-l-orange-500 ${isDarkMode ? 'bg-slate-800' : 'bg-orange-50'}`}>
+                            <h3 className="font-bold flex items-center gap-2 mb-2 text-orange-600"><AlertTriangle size={18}/> 诊断结论</h3>
+                            <ul className="text-sm space-y-2 opacity-90">
+                                <li>• 共 <b>{totalQuestions}</b> 题，<span className="text-green-600 font-bold"> {onTimeCount} </span>达标，<span className="text-red-500 font-bold"> {overtimeQuestions.length} </span>超时。</li>
+                                {overtimeQuestions.length > 0 ? (
+                                    <>
+                                        <li>• <b>严重超时 (>1.5倍)</b>：{seriousOvertimeQuestions.length > 0 ? <span className="text-red-500 font-mono break-all">{seriousOvertimeQuestions.map(q=>`#${q.id}`).join(', ')}</span> : "无"}</li>
+                                        <li>• <b>轻微超时</b>：<span className="text-orange-500 font-mono break-all">{overtimeQuestions.filter(q => !seriousOvertimeQuestions.includes(q)).map(q=>`#${q.id}`).join(', ') || "无"}</span></li>
+                                        <li className="text-xs opacity-60 mt-1 pt-1 border-t border-orange-200">建议优先复盘红字标注的题目。</li>
+                                    </>
+                                ) : (
+                                    <li className="text-green-600 font-bold">完美！所有题目都在规定时间内完成！🎉</li>
+                                )}
+                            </ul>
+                        </div>
+
+                        {/* 3. 详细数据 */}
+                        <div className={`rounded-xl border overflow-hidden ${theme.card}`}>
+                            <div className={`p-3 border-b text-xs font-bold uppercase tracking-wider opacity-50 flex justify-between ${isDarkMode ? 'bg-slate-900' : 'bg-slate-50'}`}><span>详细数据列表</span><span>{totalQuestions} 题</span></div>
+                            <div className="divide-y divide-slate-100 dark:divide-slate-700">
+                                {questions.map(q => {
+                                    const diff = q.timeSpent - config.targetTimePerQuestion;
+                                    const isSlow = diff > 0;
+                                    const isSerious = diff > config.targetTimePerQuestion * 0.5;
+                                    const isCorrect = hasAnswers ? q.userOption === q.correctAnswer : null;
+                                    return (
+                                        <div key={q.id} className="flex items-center justify-between p-3 text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                                            <div className="flex items-center gap-3 w-12"><span className="font-bold opacity-70">#{q.id}</span></div>
+                                            <div className="flex-1 mx-2 flex flex-col justify-center">
+                                                <div className="flex justify-between text-xs mb-1"><span className={`font-mono font-bold ${isSerious ? 'text-red-500' : isSlow ? 'text-orange-500' : 'text-green-500'}`}>{q.timeSpent}s</span>{isSlow && <span className="text-[10px] text-red-400">+{diff}s</span>}</div>
+                                                <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden"><div className={`h-full rounded-full ${isSerious ? 'bg-red-500' : isSlow ? 'bg-orange-400' : 'bg-green-400'}`} style={{width: `${Math.min((q.timeSpent / (config.targetTimePerQuestion*1.5)) * 80, 100)}%`}}></div></div>
+                                            </div>
+                                            <div className="w-16 flex justify-end gap-1">
+                                                {hasAnswers ? (isCorrect ? <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700 font-bold">对</span> : <span className="px-2 py-0.5 rounded text-xs bg-red-100 text-red-700 font-bold">错</span>) : (isSlow ? <span className="px-2 py-0.5 rounded text-xs bg-orange-100 text-orange-700">超时</span> : <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">达标</span>)}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                );
+            };
+
+            return (
+                <div className={`h-full w-full ${isDarkMode ? 'dark' : ''}`}>
+                    <ToastComponent />
+                    {appMode === 'setup' && renderSetup()}
+                    {appMode === 'testing' && renderTesting()}
+                    {appMode === 'mode_selection' && renderModeSelection()}
+                    {appMode === 'input_answers' && renderInputAnswers()}
+                    {appMode === 'analysis' && renderAnalysis()}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
